@@ -7,7 +7,15 @@ Application Kanban minimale réalisée pour un TP DevSecOps de deux jours.
 - Trois colonnes : **À faire**, **En cours**, **Terminé**.
 - Création de cartes avec titre et description.
 - Déplacement d'une carte entre les colonnes.
-- Persistance locale dans `data.json`.
+- Persistance dans une base **SQLite** locale (`instance/kanban.db`).
+
+## Dépendances
+
+- `Flask` : serveur web et rendu des pages.
+- `Flask-SQLAlchemy` / `SQLAlchemy` : modèle de données et accès SQLite.
+- `pytest` : tests automatisés (dépendance de développement).
+
+Ces dépendances sont intentionnelles : elles servent de base aux exercices de Software Composition Analysis avec `pip-audit`.
 
 ## Lancer localement
 
@@ -26,6 +34,8 @@ L'application écoute sur `http://localhost:8000`.
 docker build -t mini-kanban .
 docker run --rm -p 8000:8000 mini-kanban
 ```
+
+La base SQLite est conservée dans le volume `/app/instance` du conteneur.
 
 ## Contrôles DevSecOps à ajouter
 

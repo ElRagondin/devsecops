@@ -1,30 +1,35 @@
-import json
-from pathlib import Path
-
 from flask import Flask, redirect, render_template, request, url_for
+from flask_sqlalchemy import SQLAlchemy
 
 COLUMNS = ("todo", "doing", "done")
 
-
-def load_cards(data_file: Path) -> list[dict[str, str | int]]:
-    if not data_file.exists():
-        return []
-    return json.loads(data_file.read_text(encoding="utf-8"))
+db = SQLAlchemy()
 
 
-def save_cards(data_file: Path, cards: list[dict[str, str | int]]) -> None:
-    data_file.write_text(json.dumps(cards, ensure_ascii=False), encoding="utf-8")
+class Card(db.Model):
+    __tablename__ = "cards"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(500), nullable=False, default="")
+    column = db.Column(db.String(10), nullable=False, default="todo")
 
 
-def create_app(data_file: Path | None = None) -> Flask:
+def create_app(database_uri: str | None = None) -> Flask:
     app = Flask(__name__)
-    app.config["DATA_FILE"] = data_file or Path(app.root_path) / "data.json"
+    app.config.update(
+        SQLALCHEMY_DATABASE_URI=database_uri or "sqlite:///kanban.db",
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    )
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
 
     @app.get("/")
     def index() -> str:
-        cards = load_cards(app.config["DATA_FILE"])
         cards_by_column = {
-            column: [card for card in cards if card["column"] == column]
+            column: Card.query.filter_by(column=column).order_by(Card.id).all()
             for column in COLUMNS
         }
         return render_template("index.html", cards_by_column=cards_by_column)
@@ -34,24 +39,18 @@ def create_app(data_file: Path | None = None) -> Flask:
         title = request.form["title"].strip()
         description = request.form["description"].strip()
         if title:
-            cards = load_cards(app.config["DATA_FILE"])
-            next_id = max((int(card.get("id", 0)) for card in cards), default=0) + 1
-            cards.append(
-                {"id": next_id, "title": title, "description": description, "column": "todo"}
-            )
-            save_cards(app.config["DATA_FILE"], cards)
+            db.session.add(Card(title=title, description=description, column="todo"))
+            db.session.commit()
         return redirect(url_for("index"))
 
     @app.post("/cards/<int:card_id>/move")
     def move_card(card_id: int) -> str:
         target_column = request.form["column"]
         if target_column in COLUMNS:
-            cards = load_cards(app.config["DATA_FILE"])
-            for card in cards:
-                if card.get("id") == card_id:
-                    card["column"] = target_column
-                    save_cards(app.config["DATA_FILE"], cards)
-                    break
+            card = db.session.get(Card, card_id)
+            if card:
+                card.column = target_column
+                db.session.commit()
         return redirect(url_for("index"))
 
     return app
