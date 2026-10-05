@@ -45,7 +45,7 @@ jobs:
           docker run --detach \
             --name mini-kanban \
             --restart unless-stopped \
-            --publish 127.0.0.1:8000:8000 \
+            --publish 0.0.0.0:8000:8000 \
             --volume mini-kanban-data:/app/instance \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m \
