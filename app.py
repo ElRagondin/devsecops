@@ -1,4 +1,4 @@
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from flask_sqlalchemy import SQLAlchemy
 
 COLUMNS = ("todo", "doing", "done")
@@ -25,6 +25,10 @@ def create_app(database_uri: str | None = None) -> Flask:
 
     with app.app_context():
         db.create_all()
+
+    @app.get("/health")
+    def health() -> tuple[dict[str, str], int]:
+        return jsonify(status="ok"), 200
 
     @app.get("/")
     def index() -> str:

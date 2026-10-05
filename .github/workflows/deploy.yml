@@ -1,0 +1,68 @@
+name: Deploy Mini Kanban
+
+on:
+  push:
+    branches: [feat/mini-kanban-mvp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mini-kanban-local-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy locally
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Docker and local port availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}'
+          if docker container inspect mini-kanban >/dev/null 2>&1; then
+            docker rm --force mini-kanban
+          fi
+          if ss -ltnH '( sport = :8000 )' | grep -q .; then
+            echo 'Port 8000 is already in use by another service.' >&2
+            exit 1
+          fi
+
+      - name: Build application image
+        run: docker build --tag mini-kanban:${{ github.sha }} .
+
+      - name: Start application container
+        run: |
+          docker run --detach \
+            --name mini-kanban \
+            --restart unless-stopped \
+            --publish 127.0.0.1:8000:8000 \
+            --volume mini-kanban-data:/app/instance \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            mini-kanban:${{ github.sha }}
+
+      - name: Verify local health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs --tail 100 mini-kanban
+          exit 1
+
+      - name: Report deployed container
+        run: docker inspect --format 'State={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} Image={{.Config.Image}} Ports={{json .NetworkSettings.Ports}}' mini-kanban

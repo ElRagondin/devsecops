@@ -8,6 +8,14 @@ def test_application_entrypoint_exists():
     assert Path("app.py").is_file()
 
 
+def test_health_endpoint_returns_ok(tmp_path):
+    app = create_app(database_uri=f"sqlite:///{tmp_path / 'kanban.db'}")
+    response = app.test_client().get("/health")
+
+    assert response.status_code == 200
+    assert response.json == {"status": "ok"}
+
+
 def test_home_page_shows_the_three_kanban_columns(tmp_path):
     app = create_app(database_uri=f"sqlite:///{tmp_path / 'kanban.db'}")
     response = app.test_client().get("/")
