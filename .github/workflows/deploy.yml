@@ -25,6 +25,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          id
+          stat --format 'Docker socket: mode=%a owner=%U group=%G' /var/run/docker.sock
+          getent group docker
           docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}'
           if docker container inspect mini-kanban >/dev/null 2>&1; then
             docker rm --force mini-kanban
