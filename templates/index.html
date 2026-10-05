@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mini Kanban</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main>
+      <h1>Mini Kanban</h1>
+
+      <form class="new-card" action="{{ url_for('add_card') }}" method="post">
+        <label for="title">Titre</label>
+        <input id="title" name="title" required>
+        <label for="description">Description</label>
+        <input id="description" name="description">
+        <button type="submit">Ajouter une carte</button>
+      </form>
+
+      <div class="board">
+        {% for column, label in [('todo', 'A faire'), ('doing', 'En cours'), ('done', 'Termine')] %}
+          <section class="column">
+            <h2>{{ label }}</h2>
+            {% for card in cards_by_column[column] %}
+              <article class="card">
+                <h3>{{ card.title }}</h3>
+                {% if card.description %}<p>{{ card.description }}</p>{% endif %}
+                <form action="{{ url_for('move_card', card_id=card.id) }}" method="post">
+                  <label for="column-{{ card.id }}">Deplacer vers</label>
+                  <select id="column-{{ card.id }}" name="column">
+                    {% for target, target_label in [('todo', 'A faire'), ('doing', 'En cours'), ('done', 'Termine')] %}
+                      <option value="{{ target }}" {% if card.column == target %}selected{% endif %}>{{ target_label }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit">Deplacer</button>
+                </form>
+              </article>
+            {% endfor %}
+          </section>
+        {% endfor %}
+      </div>
+    </main>
+  </body>
+</html>
