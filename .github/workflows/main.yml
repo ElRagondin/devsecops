@@ -33,5 +33,12 @@ jobs:
       - name: Run Bandit SAST
         run: bandit -r app.py -q
 
-      - name: Run pip-audit SCA
-        run: pip-audit -r requirements.txt
+      - name: Run pip-audit SCA and generate SBOM
+        run: pip-audit -r requirements.txt --format cyclonedx-json --output sbom.cdx.json
+
+      - name: Upload CycloneDX SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
