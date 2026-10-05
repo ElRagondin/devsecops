@@ -42,7 +42,12 @@ jobs:
         run: bandit -r app.py -q
 
       - name: Run Semgrep SAST
-        run: semgrep scan --config p/default --error app.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --volume "$PWD:/src:ro" \
+            returntocorp/semgrep:1.179.0 \
+            semgrep scan --config p/default --error /src/app.py
 
       - name: Run pip-audit SCA and generate Python SBOM
         run: pip-audit -r requirements.txt --format cyclonedx-json --output sbom-python.cdx.json
