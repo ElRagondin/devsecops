@@ -1,11 +1,14 @@
-name: Deploy Mini Kanban
+name: Secure build and deploy Mini Kanban
 
 on:
   push:
     branches: [feat/mini-kanban-mvp]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
+  id-token: write
 
 concurrency:
   group: mini-kanban-local-deployment
@@ -13,35 +16,91 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and deploy locally
+    name: Build, scan, sign and deploy
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Define image repository
+        shell: bash
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mini-kanban" >> "$GITHUB_ENV"
+
       - name: Verify Docker and local port availability
         shell: bash
         run: |
           set -euo pipefail
-          id
-          stat --format 'Docker socket: mode=%a owner=%U group=%G' /var/run/docker.sock
-          getent group docker
           docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}'
-          if docker container inspect mini-kanban >/dev/null 2>&1; then
-            docker rm --force mini-kanban
-          fi
-          if ss -ltnH '( sport = :8000 )' | grep -q .; then
+          if ss -ltnH '( sport = :8000 )' | grep -q . && ! docker container inspect mini-kanban >/dev/null 2>&1; then
             echo 'Port 8000 is already in use by another service.' >&2
             exit 1
           fi
 
       - name: Build application image
-        run: docker build --tag mini-kanban:${{ github.sha }} .
+        run: docker build --tag "$IMAGE:${{ github.sha }}" .
 
-      - name: Start application container
+      - name: Scan image with Trivy
+        shell: bash
         run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$PWD:/output" \
+            aquasec/trivy:0.68.2 \
+            image --ignore-unfixed --severity CRITICAL --exit-code 1 \
+            --format json --output /output/trivy-image.json "$IMAGE:${{ github.sha }}"
+
+      - name: Generate image SBOM with Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$PWD:/output" \
+            aquasec/trivy:0.68.2 \
+            image --format cyclonedx --output /output/sbom-image.cdx.json "$IMAGE:${{ github.sha }}"
+
+      - name: Log in to GitHub Container Registry
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push immutable build candidate
+        run: docker push "$IMAGE:${{ github.sha }}"
+
+      - name: Resolve pushed image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_ref="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.sha }}")"
+          test -n "$image_ref"
+          echo "IMAGE_REF=$image_ref" >> "$GITHUB_ENV"
+          echo "Deploy candidate: $image_ref"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.2
+
+      - name: Sign image with GitHub OIDC identity
+        run: cosign sign --yes "$IMAGE_REF"
+
+      - name: Verify image signature before deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/feat/mini-kanban-mvp" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE_REF"
+
+      - name: Replace the running container with the verified digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE_REF"
+          docker rm --force mini-kanban 2>/dev/null || true
           docker run --detach \
             --name mini-kanban \
             --restart unless-stopped \
@@ -52,13 +111,13 @@ jobs:
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
             --env PYTHONDONTWRITEBYTECODE=1 \
-            mini-kanban:${{ github.sha }}
+            "$IMAGE_REF"
 
       - name: Verify local health endpoint
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 10); do
+          for attempt in $(seq 1 15); do
             if curl --fail --silent --show-error http://127.0.0.1:8000/health; then
               exit 0
             fi
@@ -66,6 +125,26 @@ jobs:
           done
           docker logs --tail 100 mini-kanban
           exit 1
+
+      - name: Run OWASP ZAP baseline DAST scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            --volume "$PWD:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://127.0.0.1:8000 -m 1 -I -J zap-report.json
+
+      - name: Upload container security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-security-reports
+          path: |
+            trivy-image.json
+            sbom-image.cdx.json
+            zap-report.json
+          if-no-files-found: warn
 
       - name: Report deployed container
         run: docker inspect --format 'State={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} Image={{.Config.Image}} Ports={{json .NetworkSettings.Ports}}' mini-kanban

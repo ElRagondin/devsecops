@@ -16,6 +16,16 @@ def test_health_endpoint_returns_ok(tmp_path):
     assert response.json == {"status": "ok"}
 
 
+def test_health_endpoint_sets_baseline_security_headers(tmp_path):
+    app = create_app(database_uri=f"sqlite:///{tmp_path / 'kanban.db'}")
+    response = app.test_client().get("/health")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Content-Security-Policy"] == "default-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+
+
 def test_home_page_shows_the_three_kanban_columns(tmp_path):
     app = create_app(database_uri=f"sqlite:///{tmp_path / 'kanban.db'}")
     response = app.test_client().get("/")

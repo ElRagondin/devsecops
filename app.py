@@ -26,6 +26,16 @@ def create_app(database_uri: str | None = None) -> Flask:
     with app.app_context():
         db.create_all()
 
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
     @app.get("/health")
     def health() -> tuple[dict[str, str], int]:
         return jsonify(status="ok"), 200
@@ -61,8 +71,3 @@ def create_app(database_uri: str | None = None) -> Flask:
 
 
 app = create_app()
-
-
-if __name__ == "__main__":
-    # Required for a containerized lab app; network exposure is controlled by Docker.
-    app.run(host="0.0.0.0", port=8000)  # nosec B104

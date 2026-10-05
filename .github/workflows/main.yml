@@ -12,9 +12,9 @@ permissions:
 
 jobs:
   quality-and-security:
-    name: Tests, SAST and SCA
+    name: Tests, secret scan, SAST, SCA and IaC
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -38,15 +38,31 @@ jobs:
       - name: Run tests
         run: PYTHONPATH=. pytest tests/ -q
 
-      - name: Run Bandit SAST
+      - name: Run Bandit Python SAST
         run: bandit -r app.py -q
 
-      - name: Run pip-audit SCA and generate SBOM
-        run: pip-audit -r requirements.txt --format cyclonedx-json --output sbom.cdx.json
+      - name: Run Semgrep SAST
+        run: semgrep scan --config p/default --error app.py
 
-      - name: Upload CycloneDX SBOM
+      - name: Run pip-audit SCA and generate Python SBOM
+        run: pip-audit -r requirements.txt --format cyclonedx-json --output sbom-python.cdx.json
+
+      - name: Scan container configuration as code
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/work:ro" \
+            --volume "$PWD:/output" \
+            aquasec/trivy:0.68.2 \
+            config --severity CRITICAL --exit-code 1 --format json \
+            --output /output/trivy-config.json /work
+
+      - name: Upload Python SBOM and IaC scan
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-cyclonedx
-          path: sbom.cdx.json
+          name: devsecops-ci-reports
+          path: |
+            sbom-python.cdx.json
+            trivy-config.json
           if-no-files-found: error
