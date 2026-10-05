@@ -60,4 +60,5 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+    # Required for a containerized lab app; network exposure is controlled by Docker.
+    app.run(host="0.0.0.0", port=8000)  # nosec B104
