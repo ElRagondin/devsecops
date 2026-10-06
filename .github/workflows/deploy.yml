@@ -1,14 +1,15 @@
-name: Secure build and deploy Mini Kanban
+name: Deploy Mini Kanban locally
 
 on:
-  push:
-    branches: [feat/mini-kanban-mvp]
+  workflow_run:
+    workflows: ["DevSecOps pipeline"]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
+  packages: read
 
 concurrency:
   group: mini-kanban-local-deployment
@@ -16,48 +17,20 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build, scan, sign and deploy
+    name: Verify and deploy signed image
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Deployment has its own gates: a failed PR check cannot be bypassed by
-      # a direct push to this branch.
-      - name: Scan for exposed secrets
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install test and security dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-
-      - name: Run tests, Bandit and pip-audit
-        run: |
-          PYTHONPATH=. pytest tests/ -q
-          bandit -r app.py -q
-          pip-audit -r requirements.txt
-
-      - name: Run Semgrep SAST
+      - name: Define published image and source commit
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm --volume "$PWD:/src:ro" \
-            returntocorp/semgrep:1.179.0 \
-            semgrep scan --config p/default --error /src/app.py
-
-      - name: Define image repository
-        shell: bash
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mini-kanban" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mini-kanban" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_ENV"
 
       - name: Verify Docker and local port availability
         shell: bash
@@ -69,60 +42,31 @@ jobs:
             exit 1
           fi
 
-      - name: Build application image
-        run: docker build --tag "$IMAGE:${{ github.sha }}" .
-
-      - name: Scan image with Trivy
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            --volume /var/run/docker.sock:/var/run/docker.sock \
-            --volume "$PWD:/output" \
-            aquasec/trivy:0.68.2 \
-            image --ignore-unfixed --severity CRITICAL --exit-code 1 \
-            --format json --output /output/trivy-image.json "$IMAGE:${{ github.sha }}"
-
-      - name: Generate image SBOM with Trivy
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            --volume /var/run/docker.sock:/var/run/docker.sock \
-            --volume "$PWD:/output" \
-            aquasec/trivy:0.68.2 \
-            image --format cyclonedx --output /output/sbom-image.cdx.json "$IMAGE:${{ github.sha }}"
-
       - name: Log in to GitHub Container Registry
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "$GH_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-      - name: Push immutable build candidate
-        run: docker push "$IMAGE:${{ github.sha }}"
-
-      - name: Resolve pushed image digest
+      - name: Pull the published candidate and resolve its digest
         shell: bash
         run: |
           set -euo pipefail
-          image_ref="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.sha }}")"
+          docker pull "$IMAGE:$SOURCE_SHA"
+          image_ref="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$SOURCE_SHA")"
           test -n "$image_ref"
           echo "IMAGE_REF=$image_ref" >> "$GITHUB_ENV"
-          echo "Deploy candidate: $image_ref"
+          echo "Deployment candidate: $image_ref"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.9.2
 
-      - name: Sign image with GitHub OIDC identity
-        run: cosign sign --yes "$IMAGE_REF"
-
-      - name: Verify image signature before deployment
+      - name: Verify signature from the main delivery pipeline
         shell: bash
         run: |
           set -euo pipefail
           cosign verify \
-            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/feat/mini-kanban-mvp" \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/main.yml@refs/heads/main" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$IMAGE_REF"
 
@@ -130,7 +74,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker pull "$IMAGE_REF"
           docker rm --force mini-kanban 2>/dev/null || true
           docker run --detach \
             --name mini-kanban \
@@ -166,15 +109,12 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t http://127.0.0.1:8000 -m 1 -I -J zap-report.json
 
-      - name: Upload container security reports
+      - name: Upload DAST report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: container-security-reports
-          path: |
-            trivy-image.json
-            sbom-image.cdx.json
-            zap-report.json
+          name: dast-report
+          path: zap-report.json
           if-no-files-found: warn
 
       - name: Report deployed container
