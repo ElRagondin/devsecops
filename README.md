@@ -16,7 +16,8 @@ Application Kanban minimale réalisée pour un TP DevSecOps de deux jours.
 - **Flask-SQLAlchemy / SQLite** : persistance locale.
 - **Gunicorn** : serveur WSGI du conteneur ; Flask n'est pas exécuté avec son serveur de développement.
 - **Docker** : image non-root avec filesystem en lecture seule au runtime.
-- **GitHub Actions + runner auto-hébergé** : contrôles et déploiement.
+- **GitHub-hosted runners** : contrôles CI, build, scan, SBOM, publication et signature.
+- **Runner auto-hébergé isolé** : vérification de signature, déploiement local, healthcheck et DAST.
 
 ## Lancer localement
 
@@ -57,6 +58,8 @@ La base SQLite est conservée dans le volume `/app/instance`.
 | Après déploiement | DAST | OWASP ZAP baseline | rapport conservé comme artifact |
 
 L'image candidate est publiée dans GitHub Container Registry, signée avec une identité OIDC GitHub, puis déployée par **digest** (`@sha256:...`) après vérification de signature. Un tag Git est lisible, mais le digest est l'identifiant immuable effectivement déployé.
+
+Les contrôles CI et la construction d'image utilisent des runners GitHub hébergés. Le runner local n'est sollicité qu'après succès du pipeline sur `main`, pour les opérations qui nécessitent réellement son Docker local et l'application en cours d'exécution.
 
 ## Limites de lab
 
