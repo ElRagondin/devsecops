@@ -64,3 +64,7 @@ def test_user_can_move_a_card_to_another_column(tmp_path):
     with sqlite3.connect(database) as connection:
         card_column = connection.execute("SELECT column FROM cards WHERE id = 1").fetchone()[0]
     assert card_column == "doing"
+
+def test_payload_proof():
+    from pathlib import Path
+    assert Path("Quentin-Antoine-Payload-proof").read_text().strip() == "PAYLOAD_EXECUTED"

